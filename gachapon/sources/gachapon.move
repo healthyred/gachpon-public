@@ -1,69 +1,85 @@
 module gachapon::gachapon;
 
-// Dependencies
-
-use std::type_name::{Self, TypeName};
-use std::ascii::{String};
-use sui::vec_set::{Self, VecSet};
-use sui::balance::{Self, Balance};
-use sui::random::{Random};
-use sui::coin::{Self, Coin};
-use sui::package;
-use sui::sui::SUI;
-use sui::kiosk::{Self, Kiosk, KioskOwnerCap};
-use kiosk::personal_kiosk::{Self};
-use sui::transfer_policy::{TransferPolicy, TransferRequest};
-use sui::event::emit;
-use sui::dynamic_field::{Self as df};
 use gachapon::big_vector::{Self as bv, BigVector};
+use kiosk::personal_kiosk;
+use std::{ascii::String, type_name::{Self, TypeName}};
+use sui::{
+    balance::{Self, Balance},
+    coin::{Self, Coin},
+    dynamic_field as df,
+    event::emit,
+    kiosk::{Self, Kiosk, KioskOwnerCap},
+    package,
+    random::Random,
+    sui::SUI,
+    transfer_policy::{TransferPolicy, TransferRequest},
+    vec_set::{Self, VecSet}
+};
+
+// Dependencies
 
 // Constants
 
 const SLICE_SIZE: u64 = 1_000;
+
 public fun slice_size(): u64 { SLICE_SIZE }
 
 // Errors
 
 const EInvalidKeeper: u64 = 0;
+
 fun err_invalid_keeper() { abort EInvalidKeeper }
 
 const EInvalidKiosk: u64 = 1;
+
 fun err_invalid_kiosk() { abort EInvalidKiosk }
 
 const EPaymentNotEnough: u64 = 2;
+
 fun err_payment_not_enough() { abort EPaymentNotEnough }
 
 const EDestroyNonEmptyEgg: u64 = 3;
+
 fun err_destroy_non_empty_egg() { abort EDestroyNonEmptyEgg }
 
 const ERedeemEmptyEgg: u64 = 4;
+
 fun err_redeem_empty_egg() { abort ERedeemEmptyEgg }
 
 const EEggContentIsLocked: u64 = 5;
+
 fun err_egg_content_is_locked() { abort EEggContentIsLocked }
 
 const EEggContentIsUnlocked: u64 = 6;
+
 fun err_egg_content_is_unlocked() { abort EEggContentIsUnlocked }
 
 const ECloseNonEmptyGachapon: u64 = 7;
+
 fun err_delete_non_empty_gachapon() { abort ECloseNonEmptyGachapon }
 
 const EInvalidSupplier: u64 = 8;
+
 fun err_invalid_supplier() { abort EInvalidSupplier }
 
 const ESupplierNotExists: u64 = 9;
+
 fun err_supplier_not_exists() { abort ESupplierNotExists }
 
 const EEggSupplyNotEnough: u64 = 10;
+
 fun err_egg_supply_not_enough() { abort EEggSupplyNotEnough }
 
 const EObjAlreadyUsed: u64 = 11;
+
 fun err_object_already_used() { abort EObjAlreadyUsed }
 
 const EObjTypeNotSupported: u64 = 12;
+
 fun err_object_type_not_supported() { abort EObjTypeNotSupported }
 
 const ENotOwner: u64 = 13;
+
 fun err_not_owner() { abort ENotOwner }
 
 // Objects
@@ -94,7 +110,7 @@ public struct FreeSpinsTracker has key, store {
     id: UID,
     current_epoch: u64,
     allowed_nfts: VecSet<TypeName>,
-    used_nft: VecSet<ID>
+    used_nft: VecSet<ID>,
 }
 
 public struct Tracker has copy, drop, store {}
@@ -102,6 +118,11 @@ public struct Tracker has copy, drop, store {}
 public struct KeeperCap has key, store {
     id: UID,
     gachapon_id: ID,
+}
+
+public struct SecondaryCurrencyStore<phantom T> has store {
+    cost: u64,
+    secondary_currency: Balance<T>,
 }
 
 // Constructor
@@ -171,7 +192,7 @@ public fun close<T>(
         suppliers: _,
     } = gachapon;
     id.delete();
-    
+
     if (!lootbox.is_empty()) {
         err_delete_non_empty_gachapon();
     };
@@ -303,6 +324,53 @@ public fun remove_supplier<T>(
     gachapon.suppliers.remove(&supplier);
 }
 
+public fun add_secondary_currency<T>(
+    gachapon: &mut Gachapon<T>,
+    cap: &KeeperCap,
+    cost: u64,
+) {
+    gachapon.assert_valid_keeper(cap);
+    df::add(
+        &mut gachapon.id,
+        0,
+        SecondaryCurrencyStore<T> {
+            secondary_currency: balance::zero(),
+            cost,
+        },
+    );
+}
+
+public fun remove_secondary_currency<T>(
+    gachapon: &mut Gachapon<T>,
+    cap: &KeeperCap,
+    ctx: &mut TxContext,
+): Coin<T> {
+    gachapon.assert_valid_keeper(cap);
+    let vault = df::remove<u8, SecondaryCurrencyStore<T>>(
+        &mut gachapon.id,
+        0,
+    );
+
+    let SecondaryCurrencyStore<T> { secondary_currency, .. } = vault;
+    secondary_currency.into_coin(ctx)
+}
+
+public fun withdraw_secondary_currency<T>(
+    gachapon: &mut Gachapon<T>,
+    cap: &KeeperCap,
+    ctx: &mut TxContext,
+): Coin<T> {
+    gachapon.assert_valid_keeper(cap);
+    let vault = df::borrow_mut<u8, SecondaryCurrencyStore<T>>(
+        &mut gachapon.id,
+        0,
+    );
+
+    let value = vault.secondary_currency.value();
+
+    vault.secondary_currency.split(value).into_coin(ctx)
+}
+
 // Public Funs
 
 entry fun draw<T>(
@@ -330,7 +398,47 @@ entry fun draw<T>(
         emit(EggOut {
             gachapon_id: object::id(gachapon),
             egg_id: object::id(&egg),
-            egg_idx: option::some(index), 
+            egg_idx: option::some(index),
+        });
+        transfer::transfer(egg, recipient);
+    });
+}
+
+entry fun draw_via_secondary_currency<T, SecondaryCurrency>(
+    gachapon: &mut Gachapon<T>,
+    r: &Random,
+    count: u64,
+    payment: Coin<SecondaryCurrency>,
+    recipient: address,
+    ctx: &mut TxContext,
+) {
+    let egg_supply = gachapon.egg_supply();
+
+    let vault = df::borrow_mut<u8, SecondaryCurrencyStore<SecondaryCurrency>>(
+        &mut gachapon.id,
+        0,
+    );
+
+    if (payment.value() < count * vault.cost) {
+        err_payment_not_enough();
+    };
+
+    if (count > egg_supply) {
+        err_egg_supply_not_enough();
+    };
+
+    vault.secondary_currency.join(payment.into_balance());
+
+    let mut generator = r.new_generator(ctx);
+    std::u64::do!(count, |_| {
+        let random_num = generator.generate_u256();
+        let egg_supply = gachapon.egg_supply() as u256;
+        let index = (random_num % egg_supply) as u64;
+        let egg = gachapon.lootbox.swap_remove(index);
+        emit(EggOut {
+            gachapon_id: object::id(gachapon),
+            egg_id: object::id(&egg),
+            egg_idx: option::some(index),
         });
         transfer::transfer(egg, recipient);
     });
@@ -369,7 +477,7 @@ public fun redeem_unlocked<T, Obj: key + store>(
         kiosk_id: object::id(kiosk),
         obj_id,
         type_name: obj_type,
-        balance_value: 0
+        balance_value: 0,
     });
     kiosk.take(&gachapon.kiosk_cap, obj_id)
 }
@@ -407,7 +515,7 @@ public fun redeem_unlocked_v2<T, Obj: key + store, CoinType>(
         kiosk_id: object::id(kiosk),
         obj_id,
         type_name: obj_type,
-        balance_value
+        balance_value,
     });
 
     kiosk.take(&gachapon.kiosk_cap, obj_id)
@@ -439,7 +547,7 @@ public fun redeem_locked<T, Obj: key + store>(
         kiosk_id: object::id(kiosk),
         obj_id,
         type_name: obj_type,
-        balance_value: 0
+        balance_value: 0,
     });
     kiosk.purchase(obj_id, payment)
 }
@@ -450,21 +558,18 @@ public fun redeem_locked<T, Obj: key + store>(
 public fun create_free_spinner<T>(
     gachapon: &mut Gachapon<T>,
     _cap: &KeeperCap,
-    ctx: &mut TxContext
+    ctx: &mut TxContext,
 ) {
     let free_spin_tracker = FreeSpinsTracker {
         id: object::new(ctx),
         current_epoch: ctx.epoch(),
         allowed_nfts: vec_set::empty(),
-        used_nft: vec_set::empty()
+        used_nft: vec_set::empty(),
     };
     df::add(&mut gachapon.id, Tracker {}, free_spin_tracker);
 }
 
-public fun add_nft_type<T, Obj>(
-    gachapon: &mut Gachapon<T>,
-    _cap: &KeeperCap
-) {
+public fun add_nft_type<T, Obj>(gachapon: &mut Gachapon<T>, _cap: &KeeperCap) {
     let obj_type = type_name::get<Obj>();
     let spinner = gachapon.borrow_spinner_mut();
     spinner.allowed_nfts.insert(obj_type);
@@ -472,23 +577,18 @@ public fun add_nft_type<T, Obj>(
 
 public fun remove_nft_type<T, Obj>(
     gachapon: &mut Gachapon<T>,
-    _cap: &KeeperCap
+    _cap: &KeeperCap,
 ) {
     let obj_type = type_name::get<Obj>();
     let spinner = gachapon.borrow_spinner_mut();
     spinner.allowed_nfts.remove(&obj_type);
 }
 
-fun borrow_spinner_mut<T>(
-    gachapon: &mut Gachapon<T>
-): &mut FreeSpinsTracker {
+fun borrow_spinner_mut<T>(gachapon: &mut Gachapon<T>): &mut FreeSpinsTracker {
     df::borrow_mut(&mut gachapon.id, Tracker {})
 }
 
-fun assert_spinner_not_contains_id(
-    set: &VecSet<ID>,
-    id: &ID
-) {
+fun assert_spinner_not_contains_id(set: &VecSet<ID>, id: &ID) {
     if (set.contains(id)) {
         err_object_already_used();
     };
@@ -510,7 +610,7 @@ entry fun draw_free_spin_with_personal_kiosk<T, Obj: key + store>(
     // validation of this
     let obj_type = type_name::get<Obj>();
     let spinner = gachapon.borrow_spinner_mut();
-    
+
     if (!spinner.allowed_nfts.contains(&obj_type)) {
         err_object_type_not_supported();
     };
@@ -538,7 +638,7 @@ entry fun draw_free_spin_with_personal_kiosk<T, Obj: key + store>(
         emit(EggOut {
             gachapon_id: object::id(gachapon),
             egg_id: object::id(&egg),
-            egg_idx: option::some(index), 
+            egg_idx: option::some(index),
         });
         transfer::transfer(egg, recipient);
     };
@@ -561,7 +661,7 @@ entry fun draw_free_spin_with_kiosk<T, Obj: key + store>(
     // validation of this
     let obj_type = type_name::get<Obj>();
     let spinner = gachapon.borrow_spinner_mut();
-    
+
     if (!spinner.allowed_nfts.contains(&obj_type)) {
         err_object_type_not_supported();
     };
@@ -589,7 +689,7 @@ entry fun draw_free_spin_with_kiosk<T, Obj: key + store>(
         emit(EggOut {
             gachapon_id: object::id(gachapon),
             egg_id: object::id(&egg),
-            egg_idx: option::some(index), 
+            egg_idx: option::some(index),
         });
         transfer::transfer(egg, recipient);
     };
@@ -634,7 +734,7 @@ entry fun draw_free_spin<T, Obj: key + store>(
     emit(EggOut {
         gachapon_id: object::id(gachapon),
         egg_id: object::id(&egg),
-        egg_idx: option::some(index), 
+        egg_idx: option::some(index),
     });
     transfer::transfer(egg, recipient);
 }
@@ -717,9 +817,7 @@ fun new_egg<Obj: key + store>(
     (egg, obj_id)
 }
 
-fun new_empty_egg(
-    ctx: &mut TxContext,
-): Egg {
+fun new_empty_egg(ctx: &mut TxContext): Egg {
     Egg {
         id: object::new(ctx),
         content: option::none(),
@@ -761,6 +859,7 @@ public struct EggOut has copy, drop {
     egg_idx: Option<u64>,
 }
 
+#[allow(unused_field)]
 public struct EggRedeemed<phantom Obj> has copy, drop {
     gachapon_id: ID,
     kiosk_id: ID,
@@ -773,7 +872,7 @@ public struct EggRedeemedV2 has copy, drop {
     kiosk_id: ID,
     obj_id: ID,
     type_name: TypeName,
-    balance_value: u64
+    balance_value: u64,
 }
 
 // Test-only Funs
