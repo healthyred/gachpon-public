@@ -324,7 +324,16 @@ public fun remove_supplier<T>(
     gachapon.suppliers.remove(&supplier);
 }
 
+#[allow(unused)]
 public fun add_secondary_currency<T>(
+    gachapon: &mut Gachapon<T>,
+    cap: &KeeperCap,
+    cost: u64,
+) {
+    abort 0
+}
+
+public fun add_secondary_currency_fixed<T, SecondaryCurrency>(
     gachapon: &mut Gachapon<T>,
     cap: &KeeperCap,
     cost: u64,
@@ -333,35 +342,54 @@ public fun add_secondary_currency<T>(
     df::add(
         &mut gachapon.id,
         0,
-        SecondaryCurrencyStore<T> {
+        SecondaryCurrencyStore<SecondaryCurrency> {
             secondary_currency: balance::zero(),
             cost,
         },
     );
 }
 
+#[allow(unused)]
 public fun remove_secondary_currency<T>(
     gachapon: &mut Gachapon<T>,
     cap: &KeeperCap,
     ctx: &mut TxContext,
 ): Coin<T> {
+    abort 0
+}
+
+public fun remove_secondary_currency_fixed<T, SecondaryCurrency>(
+    gachapon: &mut Gachapon<T>,
+    cap: &KeeperCap,
+    ctx: &mut TxContext,
+): Coin<SecondaryCurrency> {
     gachapon.assert_valid_keeper(cap);
-    let vault = df::remove<u8, SecondaryCurrencyStore<T>>(
+    let vault = df::remove<u8, SecondaryCurrencyStore<SecondaryCurrency>>(
         &mut gachapon.id,
         0,
     );
 
-    let SecondaryCurrencyStore<T> { secondary_currency, .. } = vault;
+    let SecondaryCurrencyStore<SecondaryCurrency> { secondary_currency, .. } =
+        vault;
     secondary_currency.into_coin(ctx)
 }
 
+#[allow(unused)]
 public fun withdraw_secondary_currency<T>(
     gachapon: &mut Gachapon<T>,
     cap: &KeeperCap,
     ctx: &mut TxContext,
 ): Coin<T> {
+    abort 0
+}
+
+public fun withdraw_secondary_currency_fixed<T, SecondaryCurrency>(
+    gachapon: &mut Gachapon<T>,
+    cap: &KeeperCap,
+    ctx: &mut TxContext,
+): Coin<SecondaryCurrency> {
     gachapon.assert_valid_keeper(cap);
-    let vault = df::borrow_mut<u8, SecondaryCurrencyStore<T>>(
+    let vault = df::borrow_mut<u8, SecondaryCurrencyStore<SecondaryCurrency>>(
         &mut gachapon.id,
         0,
     );
