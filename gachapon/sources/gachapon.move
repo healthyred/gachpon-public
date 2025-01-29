@@ -399,6 +399,18 @@ public fun withdraw_secondary_currency_fixed<T, SecondaryCurrency>(
     vault.secondary_currency.split(value).into_coin(ctx)
 }
 
+public fun set_secondary_currency_cost<T, SecondaryCurrency>(
+    gachapon: &mut Gachapon<T>,
+    cap: &KeeperCap,
+    cost: u64,
+) {
+    gachapon.assert_valid_keeper(cap);
+    df::borrow_mut<u8, SecondaryCurrencyStore<SecondaryCurrency>>(
+        &mut gachapon.id,
+        0,
+    ).cost = cost;
+}
+
 // Public Funs
 
 entry fun draw<T>(
