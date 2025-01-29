@@ -454,23 +454,6 @@ public fun remove_reward_for_count<T>(
     );
 }
 
-public fun get_reward_for_count<T>(
-    gachapon: &mut Gachapon<T>,
-    count: u64,
-): u64 {
-    let vec_set = df::borrow<u8, VecSet<RewardTier>>(&gachapon.id, 1);
-
-    let mut reward = 0;
-
-    vec_set.keys().do_ref!(|tier: &RewardTier| {
-        if (tier.count >= count) {
-            reward = tier.reward;
-        };
-    });
-
-    reward
-}
-
 // Public Funs
 
 entry fun draw<T>(
@@ -927,6 +910,20 @@ fun new_empty_egg(ctx: &mut TxContext): Egg {
         id: object::new(ctx),
         content: option::none(),
     }
+}
+
+fun get_reward_for_count<T>(gachapon: &Gachapon<T>, count: u64): u64 {
+    let vec_set = df::borrow<u8, VecSet<RewardTier>>(&gachapon.id, 1);
+
+    let mut reward = 0;
+
+    vec_set.keys().do_ref!(|tier: &RewardTier| {
+        if (tier.count >= count) {
+            reward = tier.reward;
+        };
+    });
+
+    reward
 }
 
 // Events
