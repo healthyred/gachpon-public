@@ -125,6 +125,11 @@ public struct SecondaryCurrencyStore<phantom T> has store {
     secondary_currency: Balance<T>,
 }
 
+public struct RewardTier has store, copy, drop {
+    count: u64,
+    reward: u64,
+}
+
 // Constructor
 
 fun init(otw: GACHAPON, ctx: &mut TxContext) {
@@ -411,6 +416,61 @@ public fun set_secondary_currency_cost<T, SecondaryCurrency>(
     ).cost = cost;
 }
 
+public fun add_reward_for_count<T>(
+    gachapon: &mut Gachapon<T>,
+    cap: &KeeperCap,
+    count: u64,
+    reward: u64,
+) {
+    gachapon.assert_valid_keeper(cap);
+
+    if (!df::exists_(&gachapon.id, 1)) {
+        df::add(&mut gachapon.id, 1, vec_set::empty<RewardTier>());
+    };
+
+    let vec_set = df::borrow_mut<u8, VecSet<RewardTier>>(&mut gachapon.id, 1);
+
+    vec_set.insert(RewardTier {
+        count,
+        reward,
+    });
+}
+
+public fun remove_reward_for_count<T>(
+    gachapon: &mut Gachapon<T>,
+    cap: &KeeperCap,
+    count: u64,
+    reward: u64,
+) {
+    gachapon.assert_valid_keeper(cap);
+
+    let vec_set = df::borrow_mut<u8, VecSet<RewardTier>>(&mut gachapon.id, 1);
+
+    vec_set.remove(
+        &RewardTier {
+            count,
+            reward,
+        },
+    );
+}
+
+public fun get_reward_for_count<T>(
+    gachapon: &mut Gachapon<T>,
+    count: u64,
+): u64 {
+    let vec_set = df::borrow<u8, VecSet<RewardTier>>(&gachapon.id, 1);
+
+    let mut reward = 0;
+
+    vec_set.keys().do_ref!(|tier: &RewardTier| {
+        if (tier.count >= count) {
+            reward = tier.reward;
+        };
+    });
+
+    reward
+}
+
 // Public Funs
 
 entry fun draw<T>(
@@ -424,13 +484,18 @@ entry fun draw<T>(
     if (payment.value() < count * gachapon.cost()) {
         err_payment_not_enough();
     };
+
     if (count > gachapon.egg_supply()) {
         err_egg_supply_not_enough();
     };
+
     gachapon.treasury.join(payment.into_balance());
 
+    let reward = get_reward_for_count(gachapon, count);
+
     let mut generator = r.new_generator(ctx);
-    std::u64::do!(count, |_| {
+
+    std::u64::do!(count + reward, |_| {
         let random_num = generator.generate_u256();
         let egg_supply = gachapon.egg_supply() as u256;
         let index = (random_num % egg_supply) as u64;
