@@ -344,7 +344,7 @@ public fun add_secondary_currency_fixed<T, SecondaryCurrency>(
     cost: u64,
 ) {
     gachapon.assert_valid_keeper(cap);
-    df::add(
+    df::add<u64, SecondaryCurrencyStore<SecondaryCurrency>>(
         &mut gachapon.id,
         0,
         SecondaryCurrencyStore<SecondaryCurrency> {
@@ -369,7 +369,7 @@ public fun remove_secondary_currency_fixed<T, SecondaryCurrency>(
     ctx: &mut TxContext,
 ): Coin<SecondaryCurrency> {
     gachapon.assert_valid_keeper(cap);
-    let vault = df::remove<u8, SecondaryCurrencyStore<SecondaryCurrency>>(
+    let vault = df::remove<u64, SecondaryCurrencyStore<SecondaryCurrency>>(
         &mut gachapon.id,
         0,
     );
@@ -394,7 +394,7 @@ public fun withdraw_secondary_currency_fixed<T, SecondaryCurrency>(
     ctx: &mut TxContext,
 ): Coin<SecondaryCurrency> {
     gachapon.assert_valid_keeper(cap);
-    let vault = df::borrow_mut<u8, SecondaryCurrencyStore<SecondaryCurrency>>(
+    let vault = df::borrow_mut<u64, SecondaryCurrencyStore<SecondaryCurrency>>(
         &mut gachapon.id,
         0,
     );
@@ -410,7 +410,7 @@ public fun set_secondary_currency_cost<T, SecondaryCurrency>(
     cost: u64,
 ) {
     gachapon.assert_valid_keeper(cap);
-    df::borrow_mut<u8, SecondaryCurrencyStore<SecondaryCurrency>>(
+    df::borrow_mut<u64, SecondaryCurrencyStore<SecondaryCurrency>>(
         &mut gachapon.id,
         0,
     ).cost = cost;
@@ -424,11 +424,15 @@ public fun add_reward_for_count<T>(
 ) {
     gachapon.assert_valid_keeper(cap);
 
-    if (!df::exists_(&gachapon.id, 1)) {
-        df::add(&mut gachapon.id, 1, vec_set::empty<RewardTier>());
+    if (!df::exists_<u64>(&gachapon.id, 1)) {
+        df::add<u64, VecSet<RewardTier>>(
+            &mut gachapon.id,
+            1,
+            vec_set::empty<RewardTier>(),
+        );
     };
 
-    let vec_set = df::borrow_mut<u8, VecSet<RewardTier>>(&mut gachapon.id, 1);
+    let vec_set = df::borrow_mut<u64, VecSet<RewardTier>>(&mut gachapon.id, 1);
 
     vec_set.insert(RewardTier {
         count,
@@ -444,7 +448,7 @@ public fun remove_reward_for_count<T>(
 ) {
     gachapon.assert_valid_keeper(cap);
 
-    let vec_set = df::borrow_mut<u8, VecSet<RewardTier>>(&mut gachapon.id, 1);
+    let vec_set = df::borrow_mut<u64, VecSet<RewardTier>>(&mut gachapon.id, 1);
 
     vec_set.remove(
         &RewardTier {
@@ -502,7 +506,7 @@ entry fun draw_via_secondary_currency<T, SecondaryCurrency>(
 ) {
     let egg_supply = gachapon.egg_supply();
 
-    let vault = df::borrow_mut<u8, SecondaryCurrencyStore<SecondaryCurrency>>(
+    let vault = df::borrow_mut<u64, SecondaryCurrencyStore<SecondaryCurrency>>(
         &mut gachapon.id,
         0,
     );
@@ -913,7 +917,11 @@ fun new_empty_egg(ctx: &mut TxContext): Egg {
 }
 
 fun get_reward_for_count<T>(gachapon: &Gachapon<T>, count: u64): u64 {
-    let vec_set = df::borrow<u8, VecSet<RewardTier>>(&gachapon.id, 1);
+    if (!df::exists_<u64>(&gachapon.id, 1)) {
+        return 0
+    };
+
+    let vec_set = df::borrow<u64, VecSet<RewardTier>>(&gachapon.id, 1);
 
     let mut reward = 0;
 
