@@ -468,7 +468,9 @@ entry fun draw<T>(
     recipient: address,
     ctx: &mut TxContext,
 ) {
-    if (payment.value() < count * gachapon.cost()) {
+    let cost = count * gachapon.cost();
+
+    if (payment.value() < cost) {
         err_payment_not_enough();
     };
 
@@ -487,10 +489,12 @@ entry fun draw<T>(
         let egg_supply = gachapon.egg_supply() as u256;
         let index = (random_num % egg_supply) as u64;
         let egg = gachapon.lootbox.swap_remove(index);
-        emit(EggOut {
+        emit(EggOutV2 {
             gachapon_id: object::id(gachapon),
             egg_id: object::id(&egg),
             egg_idx: option::some(index),
+            payment_coin_type: type_name::get<T>(),
+            cost: cost,
         });
         transfer::transfer(egg, recipient);
     });
@@ -511,7 +515,9 @@ entry fun draw_via_secondary_currency<T, SecondaryCurrency>(
         0,
     );
 
-    if (payment.value() < count * vault.cost) {
+    let cost = count * vault.cost;
+
+    if (payment.value() < cost) {
         err_payment_not_enough();
     };
 
@@ -527,10 +533,12 @@ entry fun draw_via_secondary_currency<T, SecondaryCurrency>(
         let egg_supply = gachapon.egg_supply() as u256;
         let index = (random_num % egg_supply) as u64;
         let egg = gachapon.lootbox.swap_remove(index);
-        emit(EggOut {
+        emit(EggOutV2 {
             gachapon_id: object::id(gachapon),
             egg_id: object::id(&egg),
             egg_idx: option::some(index),
+            payment_coin_type: type_name::get<SecondaryCurrency>(),
+            cost: cost,
         });
         transfer::transfer(egg, recipient);
     });
@@ -727,10 +735,12 @@ entry fun draw_free_spin_with_personal_kiosk<T, Obj: key + store>(
         let egg_supply = gachapon.egg_supply() as u256;
         let index = (random_num % egg_supply) as u64;
         let egg = gachapon.lootbox.swap_remove(index);
-        emit(EggOut {
+        emit(EggOutV2 {
             gachapon_id: object::id(gachapon),
             egg_id: object::id(&egg),
             egg_idx: option::some(index),
+            payment_coin_type: type_name::get<SUI>(),
+            cost: 0,
         });
         transfer::transfer(egg, recipient);
     };
@@ -778,10 +788,12 @@ entry fun draw_free_spin_with_kiosk<T, Obj: key + store>(
         let egg_supply = gachapon.egg_supply() as u256;
         let index = (random_num % egg_supply) as u64;
         let egg = gachapon.lootbox.swap_remove(index);
-        emit(EggOut {
+        emit(EggOutV2 {
             gachapon_id: object::id(gachapon),
             egg_id: object::id(&egg),
             egg_idx: option::some(index),
+            payment_coin_type: type_name::get<SUI>(),
+            cost: 0,
         });
         transfer::transfer(egg, recipient);
     };
@@ -823,10 +835,12 @@ entry fun draw_free_spin<T, Obj: key + store>(
     let egg_supply = gachapon.egg_supply() as u256;
     let index = (random_num % egg_supply) as u64;
     let egg = gachapon.lootbox.swap_remove(index);
-    emit(EggOut {
+    emit(EggOutV2 {
         gachapon_id: object::id(gachapon),
         egg_id: object::id(&egg),
         egg_idx: option::some(index),
+        payment_coin_type: type_name::get<SUI>(),
+        cost: 0,
     });
     transfer::transfer(egg, recipient);
 }
@@ -967,6 +981,14 @@ public struct EggOut has copy, drop {
     gachapon_id: ID,
     egg_id: ID,
     egg_idx: Option<u64>,
+}
+
+public struct EggOutV2 has copy, drop {
+    gachapon_id: ID,
+    egg_id: ID,
+    egg_idx: Option<u64>,
+    payment_coin_type: TypeName,
+    cost: u64,
 }
 
 #[allow(unused_field)]
