@@ -458,6 +458,76 @@ public fun remove_reward_for_count<T>(
     );
 }
 
+// Secondary Currency Funs
+
+public fun add_secondary_currency_explicit<T, SecondaryCurrency>(
+    gachapon: &mut Gachapon<T>,
+    cap: &KeeperCap,
+    cost: u64,
+) {
+    gachapon.assert_valid_keeper(cap);
+
+    df::add<TypeName, SecondaryCurrencyStore<SecondaryCurrency>>(
+        &mut gachapon.id,
+        type_name::get<SecondaryCurrency>(),
+        SecondaryCurrencyStore<SecondaryCurrency> {
+            secondary_currency: balance::zero(),
+            cost,
+        },
+    )
+}
+
+public fun remove_secondary_currency_explicit<T, SecondaryCurrency>(
+    gachapon: &mut Gachapon<T>,
+    cap: &KeeperCap,
+    ctx: &mut TxContext,
+): Coin<SecondaryCurrency> {
+    gachapon.assert_valid_keeper(cap);
+
+    let store = df::remove<TypeName, SecondaryCurrencyStore<SecondaryCurrency>>(
+        &mut gachapon.id,
+        type_name::get<SecondaryCurrency>(),
+    );
+
+    let SecondaryCurrencyStore<SecondaryCurrency> { secondary_currency, .. } =
+        store;
+
+    secondary_currency.into_coin(ctx)
+}
+
+public fun withdraw_secondary_currency_explicit<T, SecondaryCurrency>(
+    gachapon: &mut Gachapon<T>,
+    cap: &KeeperCap,
+    ctx: &mut TxContext,
+): Coin<SecondaryCurrency> {
+    gachapon.assert_valid_keeper(cap);
+
+    let store = df::borrow_mut<
+        TypeName,
+        SecondaryCurrencyStore<SecondaryCurrency>,
+    >(
+        &mut gachapon.id,
+        type_name::get<SecondaryCurrency>(),
+    );
+
+    let value = store.secondary_currency.value();
+
+    store.secondary_currency.split(value).into_coin(ctx)
+}
+
+public fun set_secondary_currency_cost_explicit<T, SecondaryCurrency>(
+    gachapon: &mut Gachapon<T>,
+    cap: &KeeperCap,
+    cost: u64,
+) {
+    gachapon.assert_valid_keeper(cap);
+
+    df::borrow_mut<TypeName, SecondaryCurrencyStore<SecondaryCurrency>>(
+        &mut gachapon.id,
+        type_name::get<SecondaryCurrency>(),
+    ).cost = cost;
+}
+
 // Public Funs
 
 entry fun draw<T>(
@@ -526,6 +596,53 @@ entry fun draw_via_secondary_currency<T, SecondaryCurrency>(
     };
 
     vault.secondary_currency.join(payment.into_balance());
+
+    let mut generator = r.new_generator(ctx);
+    std::u64::do!(count, |_| {
+        let random_num = generator.generate_u256();
+        let egg_supply = gachapon.egg_supply() as u256;
+        let index = (random_num % egg_supply) as u64;
+        let egg = gachapon.lootbox.swap_remove(index);
+        emit(EggOutV2 {
+            gachapon_id: object::id(gachapon),
+            egg_id: object::id(&egg),
+            egg_idx: option::some(index),
+            payment_coin_type: type_name::get<SecondaryCurrency>(),
+            cost: cost,
+        });
+        transfer::transfer(egg, recipient);
+    });
+}
+
+entry fun draw_via_secondary_currency_explicit<T, SecondaryCurrency>(
+    gachapon: &mut Gachapon<T>,
+    r: &Random,
+    count: u64,
+    payment: Coin<SecondaryCurrency>,
+    recipient: address,
+    ctx: &mut TxContext,
+) {
+    let egg_supply = gachapon.egg_supply();
+
+    let store = df::borrow_mut<
+        TypeName,
+        SecondaryCurrencyStore<SecondaryCurrency>,
+    >(
+        &mut gachapon.id,
+        type_name::get<SecondaryCurrency>(),
+    );
+
+    let cost = count * store.cost;
+
+    if (payment.value() < cost) {
+        err_payment_not_enough();
+    };
+
+    if (count > egg_supply) {
+        err_egg_supply_not_enough();
+    };
+
+    store.secondary_currency.join(payment.into_balance());
 
     let mut generator = r.new_generator(ctx);
     std::u64::do!(count, |_| {
