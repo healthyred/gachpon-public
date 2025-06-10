@@ -4,6 +4,7 @@ use gachapon::big_vector::{Self as bv, BigVector};
 use kiosk::personal_kiosk;
 use std::{ascii::String, type_name::{Self, TypeName}};
 use sui::{
+    bag::{Self, Bag},
     balance::{Self, Balance},
     coin::{Self, Coin},
     dynamic_field as df,
@@ -115,6 +116,16 @@ public struct FreeSpinsTracker has key, store {
 
 public struct Tracker has copy, drop, store {}
 
+public struct SpecialTracker has copy, drop, store {
+    epoch: u64,
+}
+
+public struct BagTracker has key, store {
+    id: UID,
+    bag: Bag,
+    ids: vector<ID>,
+}
+
 public struct KeeperCap has key, store {
     id: UID,
     gachapon_id: ID,
@@ -125,7 +136,7 @@ public struct SecondaryCurrencyStore<phantom T> has store {
     secondary_currency: Balance<T>,
 }
 
-public struct RewardTier has store, copy, drop {
+public struct RewardTier has copy, drop, store {
     count: u64,
     reward: u64,
 }
@@ -139,11 +150,7 @@ fun init(otw: GACHAPON, ctx: &mut TxContext) {
 // Public Funs
 
 #[allow(lint(share_owned))]
-public fun create<T>(
-    cost: u64,
-    init_supplier: address,
-    ctx: &mut TxContext,
-): KeeperCap {
+public fun create<T>(cost: u64, init_supplier: address, ctx: &mut TxContext): KeeperCap {
     let (kiosk, kiosk_cap) = kiosk::new(ctx);
     let kiosk_id = object::id(&kiosk);
     let gachapon = Gachapon<T> {
@@ -203,10 +210,7 @@ public fun close<T>(
     };
     lootbox.destroy_empty();
 
-    (
-        coin::from_balance(treasury, ctx),
-        kiosk.close_and_withdraw(kiosk_cap, ctx),
-    )
+    (coin::from_balance(treasury, ctx), kiosk.close_and_withdraw(kiosk_cap, ctx))
 }
 
 // Keeper Funs
@@ -273,12 +277,7 @@ public fun take<T>(
     egg
 }
 
-public fun stuff<T>(
-    gachapon: &mut Gachapon<T>,
-    cap: &KeeperCap,
-    count: u64,
-    ctx: &mut TxContext,
-) {
+public fun stuff<T>(gachapon: &mut Gachapon<T>, cap: &KeeperCap, count: u64, ctx: &mut TxContext) {
     gachapon.assert_valid_keeper(cap);
     std::u64::do!(count, |_| {
         let egg = new_empty_egg(ctx);
@@ -290,38 +289,22 @@ public fun stuff<T>(
     });
 }
 
-public fun claim<T>(
-    gachapon: &mut Gachapon<T>,
-    cap: &KeeperCap,
-    ctx: &mut TxContext,
-): Coin<T> {
+public fun claim<T>(gachapon: &mut Gachapon<T>, cap: &KeeperCap, ctx: &mut TxContext): Coin<T> {
     gachapon.assert_valid_keeper(cap);
     coin::from_balance(gachapon.treasury.withdraw_all(), ctx)
 }
 
-public fun update_cost<T>(
-    gachapon: &mut Gachapon<T>,
-    cap: &KeeperCap,
-    new_cost: u64,
-) {
+public fun update_cost<T>(gachapon: &mut Gachapon<T>, cap: &KeeperCap, new_cost: u64) {
     gachapon.assert_valid_keeper(cap);
     gachapon.cost = new_cost;
 }
 
-public fun add_supplier<T>(
-    gachapon: &mut Gachapon<T>,
-    cap: &KeeperCap,
-    supplier: address,
-) {
+public fun add_supplier<T>(gachapon: &mut Gachapon<T>, cap: &KeeperCap, supplier: address) {
     gachapon.assert_valid_keeper(cap);
     gachapon.suppliers.insert(supplier);
 }
 
-public fun remove_supplier<T>(
-    gachapon: &mut Gachapon<T>,
-    cap: &KeeperCap,
-    supplier: address,
-) {
+public fun remove_supplier<T>(gachapon: &mut Gachapon<T>, cap: &KeeperCap, supplier: address) {
     gachapon.assert_valid_keeper(cap);
     if (!gachapon.suppliers.contains(&supplier)) {
         err_supplier_not_exists();
@@ -330,11 +313,7 @@ public fun remove_supplier<T>(
 }
 
 #[allow(unused)]
-public fun add_secondary_currency<T>(
-    gachapon: &mut Gachapon<T>,
-    cap: &KeeperCap,
-    cost: u64,
-) {
+public fun add_secondary_currency<T>(gachapon: &mut Gachapon<T>, cap: &KeeperCap, cost: u64) {
     abort 0
 }
 
@@ -374,8 +353,7 @@ public fun remove_secondary_currency_fixed<T, SecondaryCurrency>(
         0,
     );
 
-    let SecondaryCurrencyStore<SecondaryCurrency> { secondary_currency, .. } =
-        vault;
+    let SecondaryCurrencyStore<SecondaryCurrency> { secondary_currency, .. } = vault;
     secondary_currency.into_coin(ctx)
 }
 
@@ -489,8 +467,7 @@ public fun remove_secondary_currency_explicit<T, SecondaryCurrency>(
         type_name::get<SecondaryCurrency>(),
     );
 
-    let SecondaryCurrencyStore<SecondaryCurrency> { secondary_currency, .. } =
-        store;
+    let SecondaryCurrencyStore<SecondaryCurrency> { secondary_currency, .. } = store;
 
     secondary_currency.into_coin(ctx)
 }
@@ -502,10 +479,7 @@ public fun withdraw_secondary_currency_explicit<T, SecondaryCurrency>(
 ): Coin<SecondaryCurrency> {
     gachapon.assert_valid_keeper(cap);
 
-    let store = df::borrow_mut<
-        TypeName,
-        SecondaryCurrencyStore<SecondaryCurrency>,
-    >(
+    let store = df::borrow_mut<TypeName, SecondaryCurrencyStore<SecondaryCurrency>>(
         &mut gachapon.id,
         type_name::get<SecondaryCurrency>(),
     );
@@ -624,10 +598,7 @@ entry fun draw_via_secondary_currency_explicit<T, SecondaryCurrency>(
 ) {
     let egg_supply = gachapon.egg_supply();
 
-    let store = df::borrow_mut<
-        TypeName,
-        SecondaryCurrencyStore<SecondaryCurrency>,
-    >(
+    let store = df::borrow_mut<TypeName, SecondaryCurrencyStore<SecondaryCurrency>>(
         &mut gachapon.id,
         type_name::get<SecondaryCurrency>(),
     );
@@ -792,10 +763,7 @@ public fun add_nft_type<T, Obj>(gachapon: &mut Gachapon<T>, _cap: &KeeperCap) {
     spinner.allowed_nfts.insert(obj_type);
 }
 
-public fun remove_nft_type<T, Obj>(
-    gachapon: &mut Gachapon<T>,
-    _cap: &KeeperCap,
-) {
+public fun remove_nft_type<T, Obj>(gachapon: &mut Gachapon<T>, _cap: &KeeperCap) {
     let obj_type = type_name::get<Obj>();
     let spinner = gachapon.borrow_spinner_mut();
     spinner.allowed_nfts.remove(&obj_type);
@@ -822,6 +790,7 @@ entry fun draw_free_spin_with_personal_kiosk<T, Obj: key + store>(
     if (personal_kiosk::owner(kiosk) != ctx.sender()) {
         err_not_owner();
     };
+
     items.map!(|e| kiosk.has_item_with_type<Obj>(e));
 
     // validation of this
@@ -832,13 +801,7 @@ entry fun draw_free_spin_with_personal_kiosk<T, Obj: key + store>(
         err_object_type_not_supported();
     };
 
-    if (ctx.epoch() != spinner.current_epoch) {
-        spinner.current_epoch = ctx.epoch();
-        spinner.used_nft = vec_set::empty();
-    };
-
-    items.do_ref!(|id| assert_spinner_not_contains_id(&spinner.used_nft, id));
-    items.do_ref!(|id| spinner.used_nft.insert(*id));
+    gachapon.add_ids_to_bag_tracker(&items, ctx);
 
     while (items.length() > 0) {
         let _id = items.pop_back();
@@ -875,6 +838,7 @@ entry fun draw_free_spin_with_kiosk<T, Obj: key + store>(
     if (!kiosk.has_access(kiosk_owner_cap)) {
         err_not_owner();
     };
+
     items.map!(|e| kiosk.has_item_with_type<Obj>(e));
 
     // validation of this
@@ -885,13 +849,7 @@ entry fun draw_free_spin_with_kiosk<T, Obj: key + store>(
         err_object_type_not_supported();
     };
 
-    if (ctx.epoch() != spinner.current_epoch) {
-        spinner.current_epoch = ctx.epoch();
-        spinner.used_nft = vec_set::empty();
-    };
-
-    items.do_ref!(|id| assert_spinner_not_contains_id(&spinner.used_nft, id));
-    items.do_ref!(|id| spinner.used_nft.insert(*id));
+    gachapon.add_ids_to_bag_tracker(&items, ctx);
 
     while (items.length() > 0) {
         let _id = items.pop_back();
@@ -900,11 +858,13 @@ entry fun draw_free_spin_with_kiosk<T, Obj: key + store>(
         if (gachapon.egg_supply() < 1) {
             err_egg_supply_not_enough();
         };
+
         let mut generator = r.new_generator(ctx);
         let random_num = generator.generate_u256();
         let egg_supply = gachapon.egg_supply() as u256;
         let index = (random_num % egg_supply) as u64;
         let egg = gachapon.lootbox.swap_remove(index);
+
         emit(EggOutV2 {
             gachapon_id: object::id(gachapon),
             egg_id: object::id(&egg),
@@ -912,6 +872,7 @@ entry fun draw_free_spin_with_kiosk<T, Obj: key + store>(
             payment_coin_type: type_name::get<SUI>(),
             cost: 0,
         });
+
         transfer::transfer(egg, recipient);
     };
 }
@@ -926,32 +887,25 @@ entry fun draw_free_spin<T, Obj: key + store>(
 ) {
     // Check that the nft hasn't already been used this epoch
     let obj_type = type_name::get<Obj>();
-    let obj_id = object::id(obj);
     let spinner = gachapon.borrow_spinner_mut();
-
-    if (ctx.epoch() != spinner.current_epoch) {
-        spinner.current_epoch = ctx.epoch();
-        spinner.used_nft = vec_set::empty();
-    };
 
     if (!spinner.allowed_nfts.contains(&obj_type)) {
         err_object_type_not_supported();
     };
 
-    if (spinner.used_nft.contains(&obj_id)) {
-        err_object_already_used();
-    };
-    spinner.used_nft.insert(obj_id);
+    gachapon.add_id_to_bag_tracker(object::id(obj), ctx);
 
     // We only draw once per nft
     if (gachapon.egg_supply() < 1) {
         err_egg_supply_not_enough();
     };
+
     let mut generator = r.new_generator(ctx);
     let random_num = generator.generate_u256();
     let egg_supply = gachapon.egg_supply() as u256;
     let index = (random_num % egg_supply) as u64;
     let egg = gachapon.lootbox.swap_remove(index);
+
     emit(EggOutV2 {
         gachapon_id: object::id(gachapon),
         egg_id: object::id(&egg),
@@ -959,6 +913,7 @@ entry fun draw_free_spin<T, Obj: key + store>(
         payment_coin_type: type_name::get<SUI>(),
         cost: 0,
     });
+
     transfer::transfer(egg, recipient);
 }
 
@@ -1024,11 +979,7 @@ public fun assert_valid_supplier<T>(gachapon: &Gachapon<T>, ctx: &TxContext) {
 
 // Internal Funs
 
-fun new_egg<Obj: key + store>(
-    obj: &Obj,
-    is_locked: bool,
-    ctx: &mut TxContext,
-): (Egg, ID) {
+fun new_egg<Obj: key + store>(obj: &Obj, is_locked: bool, ctx: &mut TxContext): (Egg, ID) {
     let obj_id = object::id(obj);
     let egg = Egg {
         id: object::new(ctx),
@@ -1129,4 +1080,76 @@ public struct EggRedeemedV2 has copy, drop {
 #[test_only]
 public fun init_for_testing(ctx: &mut TxContext) {
     init(GACHAPON {}, ctx);
+}
+
+// === Special Tracker Funs ===
+
+fun add_bag_tracker<T>(gachapon: &mut Gachapon<T>, ctx: &mut TxContext) {
+    if (
+        df::exists_<SpecialTracker>(
+            &gachapon.id,
+            SpecialTracker {
+                epoch: ctx.epoch(),
+            },
+        )
+    ) {
+        return
+    };
+
+    let tracker = BagTracker {
+        id: object::new(ctx),
+        bag: bag::new(ctx),
+        ids: vector::empty(),
+    };
+
+    df::add(
+        &mut gachapon.id,
+        SpecialTracker {
+            epoch: ctx.epoch(),
+        },
+        tracker,
+    );
+}
+
+fun add_id_to_bag_tracker<T>(gachapon: &mut Gachapon<T>, id: ID, ctx: &mut TxContext) {
+    gachapon.add_bag_tracker(ctx);
+
+    let tracker = df::borrow_mut<SpecialTracker, BagTracker>(
+        &mut gachapon.id,
+        SpecialTracker {
+            epoch: ctx.epoch(),
+        },
+    );
+
+    tracker.bag.add(id, true);
+    tracker.ids.push_back(id);
+}
+
+fun add_ids_to_bag_tracker<T>(gachapon: &mut Gachapon<T>, items: &vector<ID>, ctx: &mut TxContext) {
+    gachapon.add_bag_tracker(ctx);
+
+    let tracker = df::borrow_mut<SpecialTracker, BagTracker>(
+        &mut gachapon.id,
+        SpecialTracker {
+            epoch: ctx.epoch(),
+        },
+    );
+
+    items.do_ref!(|id| {
+        tracker.bag.add(*id, true);
+        tracker.ids.push_back(*id);
+    });
+}
+
+// === Special Tracker Public Funs ===
+
+public fun get_ids_of_current_epoch<T>(gachapon: &Gachapon<T>, ctx: &TxContext): vector<ID> {
+    let tracker = df::borrow<SpecialTracker, BagTracker>(
+        &gachapon.id,
+        SpecialTracker {
+            epoch: ctx.epoch(),
+        },
+    );
+
+    tracker.ids
 }
