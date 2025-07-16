@@ -514,6 +514,10 @@ entry fun draw<T>(
 ) {
     let cost = count * gachapon.cost();
 
+    if (gachapon.cost() == 0) {
+        abort 69_420
+    };
+
     if (payment.value() < cost) {
         err_payment_not_enough();
     };
@@ -561,6 +565,10 @@ entry fun draw_via_secondary_currency<T, SecondaryCurrency>(
 
     let cost = count * vault.cost;
 
+    if (vault.cost == 0) {
+        abort 69_420
+    };
+
     if (payment.value() < cost) {
         err_payment_not_enough();
     };
@@ -604,6 +612,10 @@ entry fun draw_via_secondary_currency_explicit<T, SecondaryCurrency>(
     );
 
     let cost = count * store.cost;
+
+    if (store.cost == 0) {
+        abort 69_420
+    };
 
     if (payment.value() < cost) {
         err_payment_not_enough();
