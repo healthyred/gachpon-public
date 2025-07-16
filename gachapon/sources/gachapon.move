@@ -1020,7 +1020,7 @@ fun get_reward_for_count<T>(gachapon: &Gachapon<T>, count: u64): u64 {
     let mut reward = 0;
 
     vec_set.keys().do_ref!(|tier: &RewardTier| {
-        if (tier.count >= count) {
+        if (count >= tier.count) {
             reward = tier.reward;
         };
     });
@@ -1125,12 +1125,9 @@ fun add_bag_tracker<T>(gachapon: &mut Gachapon<T>, ctx: &mut TxContext) {
 
 fun add_id_to_bag_tracker<T>(gachapon: &mut Gachapon<T>, id: ID, ctx: &mut TxContext) {
     gachapon.add_bag_tracker(ctx);
-
     let tracker = df::borrow_mut<SpecialTracker, BagTracker>(
         &mut gachapon.id,
-        SpecialTracker {
-            epoch: ctx.epoch(),
-        },
+        SpecialTracker { epoch: ctx.epoch() },
     );
 
     tracker.bag.add(id, true);
