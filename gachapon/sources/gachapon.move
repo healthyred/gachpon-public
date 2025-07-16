@@ -71,10 +71,6 @@ const EEggSupplyNotEnough: u64 = 10;
 
 fun err_egg_supply_not_enough() { abort EEggSupplyNotEnough }
 
-const EObjAlreadyUsed: u64 = 11;
-
-fun err_object_already_used() { abort EObjAlreadyUsed }
-
 const EObjTypeNotSupported: u64 = 12;
 
 fun err_object_type_not_supported() { abort EObjTypeNotSupported }
@@ -783,12 +779,6 @@ public fun remove_nft_type<T, Obj>(gachapon: &mut Gachapon<T>, _cap: &KeeperCap)
 
 fun borrow_spinner_mut<T>(gachapon: &mut Gachapon<T>): &mut FreeSpinsTracker {
     df::borrow_mut(&mut gachapon.id, Tracker {})
-}
-
-fun assert_spinner_not_contains_id(set: &VecSet<ID>, id: &ID) {
-    if (set.contains(id)) {
-        err_object_already_used();
-    };
 }
 
 entry fun draw_free_spin_with_personal_kiosk<T, Obj: key + store>(
